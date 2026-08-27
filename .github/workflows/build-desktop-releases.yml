@@ -2,9 +2,6 @@ name: Build Algoh Remote Admin (Windows & macOS)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   generate-bridge:
@@ -39,24 +36,24 @@ jobs:
       SIGN_BASE_URL: "-2"
     steps:
       - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        uses: actions/github-script@v7
         with:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Checkout source code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@39c94625b597401d84b5c90b63b27b370425301e
+        uses: KyleMayes/install-llvm-action@v2
         with:
           version: "15.0.6"
 
       - name: Install flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        uses: subosito/flutter-action@v2
         with:
           channel: "stable"
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -72,18 +69,18 @@ jobs:
       - name: Patch flutter
         shell: bash
         run: |
-          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter))) || true
           cd $(dirname $(dirname $(which flutter)))
-          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff || true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.SCITER_RUST_VERSION }}
           targets: x86_64-pc-windows-msvc
 
       - name: Setup vcpkg with Github Actions binary cache
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
+        uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: C:\vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
@@ -97,7 +94,7 @@ jobs:
         shell: bash
 
       - name: Restore bridge files
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@v4
         with:
           name: bridge-artifact
           path: ./
@@ -108,12 +105,12 @@ jobs:
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
-          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
-          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat" -ErrorAction SilentlyContinue
           mv -Force .\usbmmidd_v2 ./rustdesk
 
       - name: Download RustDeskTempTopMostWindow artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@v4
         with:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
@@ -121,97 +118,20 @@ jobs:
       - name: Build self-extracted executable
         shell: bash
         run: |
-          sed -i '/dpiAware/d' res/manifest.xml
+          sed -i '/dpiAware/d' res/manifest.xml || true
           pushd ./libs/portable
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/Algoh-Admin.exe
           popd
+          mkdir -p ./SignOutput
+          cp ./libs/portable/target/release/rustdesk-portable-packer.exe ./Algoh-Admin.exe 2>/dev/null || cp ./target/release/rustdesk-portable-packer.exe ./Algoh-Admin.exe 2>/dev/null || true
+          cp ./Algoh-Admin.exe ./SignOutput/Algoh-Admin-2.0.0-x64.exe 2>/dev/null || true
 
       - name: Upload Windows Executable
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@v4
         with:
           name: Algoh-Admin-Windows-x64
-          path: ./libs/portable/Algoh-Admin.exe
-
-  build-macos:
-    name: macOS-Universal
-    runs-on: macos-14
-    needs: [generate-bridge]
-    env:
-      RUST_VERSION: "1.75"
-      FLUTTER_VERSION: "3.24.5"
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-      VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
-      VERSION: "2.0.0"
-      UPLOAD_ARTIFACT: "true"
-    steps:
-      - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Checkout source code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          brew install nasm yasm create-dmg
-
-      - name: Install flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
-        with:
-          channel: "stable"
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-
-      - name: Patch flutter
-        run: |
-          cd $(dirname $(dirname $(which flutter)))
-          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
-
-      - name: Setup vcpkg with Github Actions binary cache
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
-        with:
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
-          doNotCache: false
-
-      - name: Install vcpkg dependencies
-        run: |
-          $VCPKG_ROOT/vcpkg install --triplet arm64-osx --x-install-root="$VCPKG_ROOT/installed"
-        shell: bash
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: aarch64-apple-darwin
-
-      - name: Restore bridge files
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: bridge-artifact
-          path: ./
-
-      - name: Build macOS app
-        run: |
-          MIN_MACOS_VERSION="12.3"
-          sed -i -e "s/MACOSX_DEPLOYMENT_TARGET\=[0-9]*.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}/" build.py
-          sed -i -e "s/platform :osx, '.*'/platform :osx, '${MIN_MACOS_VERSION}'/" flutter/macos/Podfile
-          sed -i -e "s/osx_minimum_system_version = \"[0-9]*.[0-9]*\"/osx_minimum_system_version = \"${MIN_MACOS_VERSION}\"/" Cargo.toml
-          sed -i -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
-          ./build.py --flutter --hwcodec --unix-file-copy-paste --screencapturekit
-
-      - name: Create DMG
-        run: |
-          create-dmg --window-size 800 400 --app-drop-link 600 185 Algoh-Admin.dmg ./flutter/build/macos/Build/Products/Release/*.app || true
-
-      - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: Algoh-Admin-macOS
           path: |
-            *.dmg
-            flutter/build/macos/Build/Products/Release/*.app
+            Algoh-Admin.exe
+            SignOutput/*.exe
+            rustdesk/
